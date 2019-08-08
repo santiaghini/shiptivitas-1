@@ -7,12 +7,11 @@ import './Board.css';
 export default class Board extends React.Component {
 	constructor(props) {
 		super(props);
-		const clients = this.getClients();
 		this.state = {
 			clients: {
-				backlog: clients.filter((client) => !client.status || client.status === 'backlog'),
-				inProgress: clients.filter((client) => client.status && client.status === 'in-progress'),
-				complete: clients.filter((client) => client.status && client.status === 'complete')
+				backlog: [],
+				inProgress: [],
+				complete: []
 			}
 		};
 		this.swimlanes = {
@@ -25,37 +24,9 @@ export default class Board extends React.Component {
 			'in-progress': 'inProgress',
 			complete: 'complete'
 		};
+		this.apiBase = 'http://localhost:3001/api/v1/clients/';
 	}
 
-	getClients() {
-		return [
-			[ '1', 'Stark, White and Abbott', 'Cloned Optimal Architecture', 'in-progress' ],
-			[ '2', 'Wiza LLC', 'Exclusive Bandwidth-Monitored Implementation', 'complete' ],
-			[ '3', 'Nolan LLC', 'Vision-Oriented 4Thgeneration Graphicaluserinterface', 'backlog' ],
-			[ '4', 'Thompson PLC', 'Streamlined Regional Knowledgeuser', 'in-progress' ],
-			[ '5', 'Walker-Williamson', 'Team-Oriented 6Thgeneration Matrix', 'in-progress' ],
-			[ '6', 'Boehm and Sons', 'Automated Systematic Paradigm', 'backlog' ],
-			[ '7', 'Runolfsson, Hegmann and Block', 'Integrated Transitional Strategy', 'backlog' ],
-			[ '8', 'Schumm-Labadie', 'Operative Heuristic Challenge', 'backlog' ],
-			[ '9', 'Kohler Group', 'Re-Contextualized Multi-Tasking Attitude', 'backlog' ],
-			[ '10', 'Romaguera Inc', 'Managed Foreground Toolset', 'backlog' ],
-			[ '11', 'Reilly-King', 'Future-Proofed Interactive Toolset', 'complete' ],
-			[ '12', 'Emard, Champlin and Runolfsdottir', 'Devolved Needs-Based Capability', 'backlog' ],
-			[ '13', 'Fritsch, Cronin and Wolff', 'Open-Source 3Rdgeneration Website', 'complete' ],
-			[ '14', 'Borer LLC', 'Profit-Focused Incremental Orchestration', 'backlog' ],
-			[ '15', 'Emmerich-Ankunding', 'User-Centric Stable Extranet', 'in-progress' ],
-			[ '16', 'Willms-Abbott', 'Progressive Bandwidth-Monitored Access', 'in-progress' ],
-			[ '17', 'Brekke PLC', 'Intuitive User-Facing Customerloyalty', 'complete' ],
-			[ '18', 'Bins, Toy and Klocko', 'Integrated Assymetric Software', 'backlog' ],
-			[ '19', 'Hodkiewicz-Hayes', 'Programmable Systematic Securedline', 'backlog' ],
-			[ '20', 'Murphy, Lang and Ferry', 'Organized Explicit Access', 'backlog' ]
-		].map((companyDetails) => ({
-			id: companyDetails[0],
-			name: companyDetails[1],
-			description: companyDetails[2],
-			status: companyDetails[3]
-		}));
-	}
 	renderSwimlane(name, clients, ref, status) {
 		return <Swimlane name={name} clients={clients} dragulaRef={ref} status={status} />;
 	}
@@ -65,21 +36,113 @@ export default class Board extends React.Component {
 		containers = containers.map((el) => {
 			return el.current;
 		});
-		Dragula(containers).on('drop', (el, target, source, sibling) => {
-			const newCardStatus = target.getAttribute('status');
+		this.drake = Dragula(containers).on('drop', (el, target, source, sibling) =>
+			this.updateCard(el, target, source, sibling)
+		);
 
-			switch (newCardStatus) {
-				case 'backlog':
-					el.className = 'Card Card-grey';
-					break;
-				case 'in-progress':
-					el.className = 'Card Card-blue';
-					break;
-				case 'complete':
-					el.className = 'Card Card-green';
-					break;
-			}
+		this.getClients();
+	}
+
+	componentWillUnmount() {
+		this.drake.remove();
+	}
+
+	getClients() {
+		let clients = [];
+		fetch(this.apiBase)
+			.then((response) => {
+				if (response.status !== 200) {
+					console.log('Looks like there was a problem. Status Code: ' + response.status);
+					return;
+				}
+				response
+					.json()
+					.then(function(data) {
+						clients = data;
+						// order by priority
+						clients = clients.sort((a, b) => (a.priority > b.priority ? 1 : -1));
+					})
+					.then(() => {
+						this.setState({
+							clients: {
+								backlog: clients.filter((client) => !client.status || client.status === 'backlog'),
+								inProgress: clients.filter(
+									(client) => client.status && client.status === 'in-progress'
+								),
+								complete: clients.filter((client) => client.status && client.status === 'complete')
+							}
+						});
+					});
+			})
+			.catch((err) => {
+				console.log('Fetch Error :-S', err);
+			});
+	}
+
+	updateCard(el, target, source, sibling) {
+		// Revert changes made in the DOM by Dragula
+		this.drake.cancel(true);
+
+		var clients = [
+			...this.state.clients.backlog,
+			...this.state.clients.inProgress,
+			...this.state.clients.complete
+		];
+
+		var oldIndex = clients.findIndex((client) => client.id == el.getAttribute('data-id'));
+		clients[oldIndex].status = target.getAttribute('status');
+
+		const siblingIndex = sibling ? clients.findIndex((client) => client.id == sibling.getAttribute('data-id')) : 0;
+		const newIndex = sibling ? (siblingIndex < oldIndex ? siblingIndex : siblingIndex - 1) : clients.length - 1;
+		this.arraymove(clients, oldIndex, newIndex);
+
+		clients = {
+			backlog: clients.filter((client) => !client.status || client.status === 'backlog'),
+			inProgress: clients.filter((client) => client.status && client.status === 'in-progress'),
+			complete: clients.filter((client) => client.status && client.status === 'complete')
+		};
+
+		for (let key in clients) {
+			clients[key].forEach((client, i) => {
+				client.priority = i + 1;
+				this.putClient(client);
+			});
+		}
+
+		this.setState({
+			clients
 		});
+	}
+
+	putClient(client) {
+		fetch(this.apiBase + client.id, {
+			method: 'put',
+			headers: {
+				'Content-type': 'application/json'
+			},
+			body: JSON.stringify({
+				status: client.status,
+				priority: client.priority
+			})
+		})
+			.then((response) => {
+				if (response.status !== 200) {
+					console.log('Looks like there was a problem. Status Code: ' + response.status);
+					return;
+				}
+				response.json().then(function(data) {
+					//console.log(data);
+				});
+			})
+			.catch((err) => {
+				console.log('Fetch Error :-S', err);
+			});
+	}
+
+	arraymove(arr, fromIndex, toIndex) {
+		var element = JSON.parse(JSON.stringify(arr[fromIndex]));
+		arr.splice(fromIndex, 1);
+		arr.splice(toIndex, 0, element);
 	}
 
 	render() {
